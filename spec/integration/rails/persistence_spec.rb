@@ -1268,6 +1268,79 @@ if ENV["APPRAISAL_INITIALIZED"]
       end
     end
 
+    describe "many_to_many nested create" do
+      let(:payload) do
+        {
+          data: {
+            type: "employees",
+            attributes: {first_name: "Joe"},
+            relationships: {
+              teams: {
+                data: [
+                  {type: "teams", 'temp-id': "team1", method: "create"},
+                ]
+              }
+            }
+          },
+          included: [
+            {
+              type: "teams",
+              'temp-id': "team1",
+               attributes: {name: "Team 1"}
+            },
+          ]
+        }
+      end
+
+      subject(:make_request) do
+        do_create(payload)
+      end
+
+      it "creates the objects" do
+        expect {
+          make_request
+        }.to change { Employee.count }.by(1)
+        employee = Employee.first
+        team = employee.teams.first
+
+        expect(employee.first_name).to eq("Joe")
+        expect(team.name).to eq ("Team 1")
+      end
+
+      context "when the relationship has validation error" do
+        around do |e|
+          begin
+            Team.validates :name, presence: true
+            e.run
+          ensure
+            Team.clear_validators!
+          end
+        end
+
+        before do
+          payload[:included][0][:attributes][:name] = nil
+        end
+
+        it "rolls backs the entire transaction" do
+          expect {
+            make_request
+          }.to_not change { Employee.count + Team.count }
+        end
+
+        context 'when the empoyee is invalid' do
+          before do
+            payload[:data][:attributes][:first_name] = nil
+          end
+
+          it 'rollbacks the transaction' do
+            expect {
+              make_request
+            }.to_not change { Employee.count + Team.count }
+          end
+        end
+      end
+    end
+
     describe "many_to_many nested relationship" do
       let(:employee) { Employee.create!(first_name: "Joe") }
       let(:prior_team) { Team.new(name: "prior") }
